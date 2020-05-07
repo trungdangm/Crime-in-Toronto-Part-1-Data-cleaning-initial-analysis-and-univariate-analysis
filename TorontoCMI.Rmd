@@ -1,0 +1,815 @@
+---
+title:  "Crime in Toronto, Part 1: Data cleaning, initial analysis, and univariate analysis"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+In this post, the Toronto crime dataset (167525 records and 29 variables) is explored. The package tidyverse is used to wrangle the data. 
+
+* Finding 47 rows with missing values. Removing all of rows containing missing values as these rows are not useful for future analyis.
+* 11973 duplicates have been found and removed. 
+* The number of columns reduced from 29 to 19. Columns were transformed to the appropriate data types.
+* Initial analysis and univariate analysis is performed. 
+
+Toronto's crime data is available on the Toronto Police Service Public Safety Data Portal.
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(readr)
+library(dplyr)
+library(DataExplorer)
+library(ggplot2)
+```
+
+```{r}
+data <- read_csv("C:/Users/TrungDang/Documents/MCI_2014_to_2018.csv")
+str(data)
+```
+
+```{r}
+introduce(data)
+```
+
+The data contains 167525 rows and 29 columns. There are also 245 missing values in total. 
+The data contain 29 variables. The variables such as reportedyear, reportedmonth, reportedday, reporteddayofweek were extracted from the native varibale reporteddate. 
+The variables such as occurenceyear, occurencemonth, occurencedday, occurencedayofweek were extracted from the native varibale occurenceddate.
+
+
+DEALING WITH DUPLICATES
+```{r}
+data %>% 
+  distinct(event_unique_id) %>% 
+  count()
+```
+There are 145817 unique ids while there are 167525 rows in the dataset. Therefore, there are maybe 21708 cases (167525-145817 = 21708) that were considered as multiple crime types, such as assault and theft.
+
+```{r}
+data %>%
+  group_by(event_unique_id) %>% 
+  summarise(countid = n()) %>% 
+  arrange(desc(countid)) %>% 
+  head(10)
+```
+
+The crime with an id GO-20151785704 appear 24 times. In order to see the information about the crime with this id
+
+```{r}
+data %>% 
+  filter(event_unique_id == "GO-20151785704") %>% 
+select(occurrencedate, reporteddate, Neighbourhood, offence, MCI)
+```
+In this case, these row with id GO-20151785704 are duplicated. The 24 rows are identical. We can remove these duplicates but what if a crime are reported as multiple types?
+
+```{r}
+data %>% 
+  filter(event_unique_id == "GO-20161246113") %>% 
+  select(occurrencedate, reporteddate, Neighbourhood, offence, MCI)
+```
+
+In this case, the crime with an id GO-20161246113 was considered as both assault and robbery. Another example of multiple offences was found for the crime with id GO-20142139964
+
+```{r}
+data %>% 
+  filter(event_unique_id == "GO-20142139964") %>% 
+  select(occurrencedate, reporteddate, Neighbourhood, offence,  MCI)
+```
+Here, the crime with the id GO-20142139964 is classified as Assault With Weapon, Assault Bodily Harm, and simply Assault. However, the row where the offence is classified as Assault Bodily Harm is duplicated.
+
+```{r}
+nrow(distinct(data))
+```
+
+The above code output shows that there are 167525 distinct rows despite the fact that we found there are many duplicate rows. To find the reason, we will examine all the columns of the row id GO-20142139964.
+
+```{r}
+data %>% 
+  filter(event_unique_id == "GO-20142139964")
+```
+
+Here, all the values in the column index_  are unique. Therefore, the search will not find any duplicate. Therefore, we should remove the column Index_ before removing duplicates. It should be noted that the two column X and Y are exactly Lat and Lon
+In addition, we can also remove the following columns: ucr_code, ucr_ext, Division, ObjectId.
+
+```{r}
+data1 <- data %>% 
+  select (-c(X, Y, Index_, ucr_code, 
+             ucr_ext, Division, ObjectId))
+```
+
+To remove all the duplicates, we use the function distinct() in tidyverse
+
+```{r}
+data2 <- data1 %>% 
+  distinct()
+```
+
+```{r}
+nrow(distinct(data2))
+```
+In consequence, the data2 contains only 155552 records. 
+We can check the row GO-20142139964 again
+```{r}
+data2 %>% 
+  filter(event_unique_id == "GO-20142139964") %>% 
+  select(occurrenceyear,occurrencemonth, occurrenceday, offence, MCI)
+```
+So three offences were committed for GO-20142139964 : Assault With Weapon, Assault, Assault Bodily Harm.
+
+We can check another crimr id . 
+```{r}
+data2 %>% 
+  filter(event_unique_id == "GO-20161246113") %>% 
+  select(occurrenceyear,occurrencemonth, occurrenceday, offence, MCI)
+```
+The crime with id GO-20161246113 was found to have two offences (Robbery with Weapon) and Assault. The MCIs for these two offences are Robbery and Assault, repectively.
+
+
+DEALING WITH MISSING VALUES
+
+```{r, fig.width = 10, fig.height = 10}
+plot_missing(data2)
+```
+There are 0.03 percent of rows that contain missing values (0.03% *155552 = 46.6656 = 47). These 47 missing values are found in the five following columns: occurrencedayofweek, occurrencedayofyear, occurrenceday, occurrencemonth, occurrenceyear.
+Another way to find the number of missing values for each column. 
+```{r}
+sapply(data2[,c("occurrencedayofweek", "occurrencedayofyear", "occurrenceday", "occurrencemonth", "occurrenceyear")], function(x) sum(is.na(x)))
+```
+
+We can see that these five columns have the same number of missing values. We can guess that these 47  rows are the same. 
+To find out if these 47 rows with missing values are the same
+
+```{r}
+a <- which(is.na(data2$occurrenceyear))
+b <- which(is.na(data2$occurrencemonth))
+c <- which(is.na(data2$occurrenceday))
+d <- which(is.na(data2$occurrencedayofyear))
+e <- which(is.na(data2$occurrencedayofweek))
+```
+We can compare pairwiseti to see if two data frames are identical.
+```{r}
+setdiff(a,b)
+all_equal(b, c, ignore_row_order = TRUE) #  Flexible equality comparison for data frames
+all_equal(c, d, ignore_row_order = TRUE)
+all_equal(d,e,ignore_row_order = TRUE)
+```
+
+We can examine further rows with missing values, as follow.
+```{r}
+head(data2[which(is.na(data2$occurrenceyear)) ,c("occurrencedate", 
+                                            "occurrenceyear",
+                                            "occurrencemonth",
+                                            "occurrenceday",
+                                            "occurrencehour")],10)
+```
+
+
+
+As we can see here that all these crimes happened before 2014. We can remove all of these records.
+If we need to keep these rows for further analysis, we have to fill these missing value with appropriate values that are extracted from the column occurrencedate and the column reporteddate. 
+
+One way to replace missing values
+data2b <- data2 %>%
+          dplyr::mutate(
+          occurrenceyear = lubridate::year(occurrencedate), 
+          occurrencemonth = lubridate::month(occurrencedate), 
+          occurrenceday = lubridate::day(occurrencedate),
+          reportedmonth = lubridate::month(reporteddate))
+
+Remove all the records with missing values
+```{r}
+data2 <- data2 %>% 
+  drop_na()
+```
+
+We can always check if the data2 contain any missing value
+```{r}
+which(is.na(data2$occurrenceyear))
+```
+
+As reportedyear, reportedmonth, reportedyear was extracted from reporteddate, we can remove the two columns reporteddate and occurencedate. At this point we can remove the following columns: occurendate and reporteddate,and event_unique_id
+
+```{r}
+data3 <- data2 %>% 
+  select(-c(occurrencedate,reporteddate, event_unique_id))
+```
+
+```{r}
+str(data3)
+```
+
+In summary, after dealing with duplicates and missing values, we obtain a data frame which 19 variables and 155505 records. 
+
+INITIAL ANALYSIS
+Univariate analysis
+
+A. PREMISESTYPE
+```{r}
+premisetype1 <- data3 %>%
+  group_by(premisetype) %>% 
+  summarise(counts = n()) %>% 
+  arrange(desc(counts))
+
+premisetype1
+```
+
+There are five types of premise, such as outside, appartment, commercial, house, and other.
+There are more crimes happened in appartments than in houses.
+
+```{r}
+g <- ggplot(premisetype1, 
+            aes(x= reorder(premisetype, -counts), y = counts))
+g + geom_bar(stat="identity", 
+             width = 0.5, 
+             fill = "blue") + 
+      labs(title="The frequency of premise type", 
+           caption="Source: CMI dataset",
+           x = "Type of premise") +
+      theme(axis.text.x = element_text(angle = 65, vjust=0.6) +
+              theme_set(theme_classic())) +
+  geom_text(aes(label=counts), position = position_dodge(width = 0.9), vjust=-0.25)
+```
+
+B. TYPES OF OFFENCES
+
+```{r}
+offencetype <- data3 %>%
+  group_by(offence) %>% 
+  summarise(counts = n()) %>% 
+  arrange(desc(counts))
+
+head(offencetype,10)
+```
+
+There are 49 types of offences, Assault appears to be the most popular type of offence. Let visualize the first 15 top offences
+
+```{r,  fig.width = 15, fig.height = 5}
+top_offence <- head(offencetype,15)
+g_offence <- ggplot(top_offence, 
+            aes(x= reorder(offence,-counts), y = counts))
+g_offence + geom_bar(stat="identity", 
+             width = 0.5, 
+             fill = "blue") + 
+      labs(title="The frequency of offence type", 
+           caption="Source: CMI dataset",
+           y = "Counts",
+           x = "The top 10 offence types") +
+      theme(axis.text.x = element_text(angle = 0, vjust = 0.6) +
+              theme_set(theme_classic())) + coord_flip()+
+  geom_text(aes(label = counts), position = position_dodge(width = 0.2), hjust = -0.3)
+```
+
+C. OCCURRENCEYEAR
+```{r}
+occur_year <- data3 %>%
+  group_by(occurrenceyear) %>% 
+  summarise(counts = n()) %>% 
+  arrange(desc(counts))
+
+occur_year
+```
+There are crimes that happened before 2014
+Find the earliest year 
+
+```{r}
+occur_ealieryear <- data3 %>%
+  group_by(occurrenceyear) %>% 
+  summarise(counts = n()) %>% 
+  arrange(occurrenceyear)
+
+occur_ealieryear 
+```
+
+We have already remove 49 records where there are missing values. These records related to all the crimes happen before 2000. Therefore, at this stage, we only see the records where the occurrenceyear is from 2000
+
+```{r}
+data3 %>% 
+  filter(occurrenceyear == 2002) %>% 
+  select(premisetype, offence ,occurrenceyear, reportedyear)
+```
+
+Apperently, crimes happened in 2002 but were reported way too long after.
+Before doing further analyis, it is better that we remove these records 
+The resulting data contain only the crimes that occurred from 2014.
+
+```{r}
+data4 <- data3 %>%
+  filter(occurrenceyear >= 2014)
+```
+
+The data4 contains 154587 rows while the data3 contains 155505 rows. 918 rows are removed. In other words, there were 918 crimes which happened beteween 2000 and 2013 but were reported only in 2014 or later.
+We can check if there are still any records where the occurrenceyear is before 2014.
+
+```{r}
+data4 %>% 
+  filter(occurrenceyear < 2014) %>% 
+  count()
+```
+
+In this case, we have to reexamine the premisetype and offencetype again
+
+```{r}
+premisetype2 <- data4 %>%
+  group_by(premisetype) %>% 
+  summarise(counts = n()) %>% 
+  arrange(desc(counts))
+
+g <- ggplot(premisetype2, 
+            aes(x= reorder(premisetype, -counts), y = counts))
+g + geom_bar(stat="identity", 
+             width = 0.5, 
+             fill = "blue") + 
+      labs(title="The frequency of premise type", 
+           caption="Source: CMI dataset",
+           x =  "The premise type",
+           y= "Counts") +
+      theme(axis.text.x = element_text(angle = 65, vjust=0.6) +
+              theme_set(theme_classic())) +
+  geom_text(aes(label=counts), position = position_dodge(width = 0.9), vjust=-0.25)
+```
+
+D. OCCURRENCEYEAR, OCCURRENCEMONTH, OCCURRENCEDAY, OCCURRENCEDAYOFWEEK
+
+```{r}
+occur_year <- data4 %>%
+  group_by(occurrenceyear) %>% 
+  summarise(counts = n()) %>% 
+  arrange(occurrenceyear)
+
+occur_year
+```
+
+```{r}
+g_occurrenceyear <- ggplot(occur_year, 
+            aes(x = occurrenceyear, y = counts))
+g_occurrenceyear + geom_bar(stat = "identity", 
+             width = 0.5, 
+             fill = "cornflowerblue") + 
+      labs(title = "Number of crimes by year", 
+           caption = "Source: CMI dataset",
+           x = "Year",
+           y = "Counts") +
+      theme(axis.text.x = element_text(size = 18, angle = 65, vjust = 0.6) +
+              theme_set(theme_classic())) +
+  geom_text(aes(label = counts), position = position_dodge(width = 0.9), vjust = -0.25)
+```
+
+The crimes (all kinds of crime) was found to increase from 29428 in 2014 to 32909 in 2018. 
+
+
+```{r}
+occur_month <- data4 %>%
+  group_by(occurrencemonth) %>% 
+  summarise(counts = n()) 
+
+occur_month 
+```
+
+The result is sorted in alphabetical order. We need to convert the following varibles into factor, reporteddayofweek,occurrencemonth, occurrencedayofweek
+
+```{r}
+data4$occurrencemonth <- factor(data4$occurrencemonth,
+                                levels = c("January","February","March",
+                                           "April","May","June",
+                                           "July","August", "September",
+                                           "October","November","December"),ordered = TRUE)
+
+data4$occurrencedayofweek <- factor(data4$occurrencedayofweek,
+                                    levels = c("Monday","Tuesday",
+                                               "Wednesday","Thursday",
+                                               "Friday","Saturday","Sunday"),ordered = TRUE)
+
+data4$reportedmonth <- factor(data4$reportedmonth,
+                              levels = c("January","February","March", 
+                                         "April","May","June",
+                                         "July","August","September",
+                                         "October","November","December"),ordered = TRUE)
+
+data4$reporteddayofweek <- factor(data4$reporteddayofweek,
+                                  levels = c("Monday","Tuesday",
+                                             "Wednesday","Thursday", 
+                                             "Friday","Saturday", "Sunday"),ordered = TRUE)
+
+```
+
+```{r}
+occurrencemonth_tbl <-  data4 %>% 
+  group_by(occurrencemonth) %>% 
+  summarise(counts= n())
+
+occurrencemonth_tbl
+```
+Now, months is sorted in chronological order. February appears to be the month where less crimes were committed.
+
+```{r, fig.width = 10, fig.height = 5}
+g_occurrenceMONTH <- ggplot(occurrencemonth_tbl, 
+            aes(x = occurrencemonth, y = counts))
+g_occurrenceMONTH + geom_bar(stat = "identity", 
+             width = 0.5, 
+             fill = "cornflowerblue") + 
+      labs(title = "Number of crimes by year", 
+           caption = "Source: CMI dataset",
+           x = "Year",
+           y = "Counts") +
+      theme(axis.text.x = element_text(size = 18, angle = 65, vjust = 0.6) +
+              theme_set(theme_classic())) +
+  geom_text(aes(label = counts), position = position_dodge(width = 0.9), vjust = -0.25)
+
+```
+
+OCCRRENCEDAYOFMONTH
+
+```{r,fig.width = 10, fig.height = 5}
+occurrencedayofmonth_tbl <-  data4 %>% 
+  group_by(occurrenceday) %>% 
+  count()
+
+g_occurrenceday <- ggplot(occurrencedayofmonth_tbl, aes(x = occurrenceday, y = n))
+g_occurrenceday + 
+  geom_line(color = "blue", size = 1) + 
+  geom_point(color = "blue", size = 3)+
+      labs(title = "Number of crimes by day of month", 
+           caption = "Source: CMI dataset",
+           x = "Day of month",
+           y = "Counts") + theme_set(theme_classic())
+```
+When comparing the total crime in function of month, we should remember that are 7 months that have 31 days, and the month of February only has 28 days.
+
+
+OCCURRENCEDAYOFWEEK
+
+```{r}
+occurrencedayofweek_tbl <-  data4 %>% 
+  group_by(occurrencedayofweek) %>% 
+  count()
+
+g_occurrenceday <- ggplot(occurrencedayofweek_tbl, 
+            aes(x = occurrencedayofweek, y = n))
+g_occurrenceday + geom_bar(stat = "identity", 
+             width = 0.75, 
+             fill = "cornflowerblue") + 
+      labs(title = "Number of crimes by year", 
+           caption = "Source: CMI dataset",
+           x = "Days of week",
+           y = "Counts") + theme_set(theme_classic()) +
+  geom_text(aes(label=n), position = position_dodge(width = 0.9), vjust = -0.25)
+```
+
+The number of crimes occurred on Friday, Saturday and Sunday are higher than those of the rest of the week.
+
+OCCURRENCEHOUR
+
+```{r,fig.width = 10, fig.height = 5}
+
+occurrencehour_tbl <-  data4 %>% 
+  group_by(occurrencehour) %>% 
+  summarise(counts = n()) %>% 
+  arrange(desc(counts))
+
+g_occurrencehour <- ggplot(occurrencehour_tbl, 
+            aes(x = occurrencehour, y = counts))
+g_occurrencehour + geom_line(color = "purple") + geom_point (color = "blue", size = 2) +
+      labs(title = "Number of crimes by time of the day", 
+           caption = "Source: CMI dataset",
+           x = "Time of the day",
+           y = "Counts") + theme_set(theme_classic())
+```
+The number of crimes appears to be small in the early morning. The number of crime increased gradually during the day and reached more than 10000 at 12 am. It should be noted that the highest numbers of crime were found to at 12 am and 12 pm.
+
+MAJOR CRIME INDICATORS (MCI)
+
+```{r}
+
+
+MCI_tbl <- data4 %>% 
+  group_by(MCI) %>% 
+  summarise(counts = n()) %>% 
+  arrange(desc(counts))
+MCI_tbl
+```
+
+All the reported crimes  are classified in five types of MIC, naming Assault, Break and Enter, Robberdy, and Theft Over. 
+```{r}
+MCI_data <- data.frame(
+  group = MCI_tbl$MCI,
+  value = MCI_tbl$counts)
+MCI_data
+```
+
+```{r, fig.width = 15, fig.height = 5}
+
+MIC_g <- ggplot(data = MCI_data, aes(x = reorder(group,-value), y = value)) +
+  geom_col(aes(fill = group) , show.legend = FALSE) +
+  ggtitle(paste("The number of crime by categories")) +
+  coord_flip() +
+  geom_label(aes(label = paste(MCI_data$value, floor((MCI_data$value/sum(MCI_data$value))*100), 
+                               sep = "\n"), fill = group),
+             show.legend = FALSE,
+             size = 5, 
+             label.padding = unit(0.25, "lines")) +
+  expand_limits(y = -150) +
+  scale_fill_brewer(palette = "Set1", direction = -1) +
+  labs(title = "Number of crimes by categoies", 
+           caption = "Source: CMI dataset",
+           y = "Counts",
+           x = "Major Crime Indicators")
+
+MIC_g
+```
+
+From 2014 to 2018, Assault is the most popolar crime. Indeed, 53% of crimes are classified as assault. There are only 3% of total crimes that are Theft Over. The proportion of Robbery and Auto Theft are similar, 9% and 10 % repectively. The break and Enter crime is twice as many as Auto Theft crime. 
+
+NEIGHBOURHOOD
+First, we should see how many neighbourhood in Toronto?
+
+```{r}
+n_distinct(data4$Hood_ID)
+```
+
+```{r}
+n_distinct(data4$Neighbourhood)
+```
+Since there are only 140 neighbourhoods in Toronto, there is mistake in the column Neigbourhood. 
+Let find out this mistake by examining a few lines of the column Neigbourhood. 
+
+```{r}
+head(data4$Neighbourhood)
+```
+The Neighbourhood column contains the name of neighbourhoods as well as the id number of these neighbourhoods. The mistake could get from the name or the id.
+
+First, we can check if there is any wrong number in the parenthesis. As Toronto has 140 neighbourhoods, one possible mistake can be the number 141 that was assigned to one neighbourhood.
+
+```{r}
+sum(str_detect(data4$Neighbourhood, "141"))
+```
+So, thers is not number 141 in this column. However, we can not continue this methode by increase the number to 142, 143, 144...
+One way to tackle this problem is extracting the hoodid from the column Neighbourhood, name the new column as  Hood_id2, and compare with Hood_ID, row by row. We will see if there is a mismatch.
+
+```{r}
+data5 <- data4 %>% 
+  mutate(Hood_ID2 = regmatches(data4$Neighbourhood, regexpr("[0-9]+",data4$Neighbourhood)))
+```
+
+```{r}
+class(data5$Hood_ID)
+class(data5$Hood_ID2)
+```
+We need to conver Hood_ID2 into numeric
+```{r}
+data5$Hood_ID2 <- as.numeric(data5$Hood_ID2)
+```
+Checking
+```{r}
+class(data5$Hood_ID)
+class(data5$Hood_ID2)
+```
+
+Now, we can find the number of rows that two columns Hood_ID and Hood_ID2 have different/same values
+
+```{r}
+data5 %>% 
+  filter(Hood_ID != Hood_ID2) %>% 
+  count()
+```
+There are no mismatch. We can conclude that there is no mistake related to the id of neighbourhood.
+Rather, mistakes come from the name of the neighboughood
+
+We can go back to the data4 as we do not need the Hood_ID2 column.
+If there is any mistake related to the name, we suspect that the number of the neighbourhood will be minor. We can count neighbourhood in the data. 
+```{r}
+data4 %>% 
+  group_by(Neighbourhood) %>% 
+  summarise(counts = n()) %>% 
+  arrange((counts)) %>% 
+  head(10)
+```
+We can see that the neighbourhood Eringate-Centennial_West Deane (11) appears 23 times. 
+The mistake come from the neigbouhood named Eringate-Centennial-West Deane and Eringate-Centennial_West Deane (11), it should be Eringate-Centennial-West Deane
+
+```{r}
+data4 %>% 
+  group_by(Neighbourhood) %>%
+  summarise(counts = n()) %>% 
+  filter(Neighbourhood %in% 
+           c("Eringate-Centennial_West Deane (11)","Eringate-Centennial-West Deane (11)"))
+```
+
+Now, we need to replace Eringate-Centennial_West Deane (11) by Eringate-Centennial-West Deane (11)
+
+```{r}
+data4$Neighbourhood <- str_replace(data4$Neighbourhood, 
+                                   "Eringate-Centennial_West Deane (11)", 
+                                   "Eringate-Centennial-West Deane (11)")
+```
+
+There are 140 Neighbourhoods in Toronto. We will display the 10 neighbourhoods with the lowest number of crimes and the highest number of crimes.
+```{r}
+NeighbourhoodCrime <- data4 %>% 
+  group_by(Neighbourhood) %>% 
+  summarise(counts = n()) %>% 
+  arrange(desc(counts))
+```
+
+```{r}
+head(NeighbourhoodCrime,10)
+```
+
+FURTHER UNDERSTANDING THE DATA.
+
+First, we have seen that there are many crimes committed before 2014. Some of them occured in the 70s. These crimes have been later reported in 2014 (to 2018). We have already remove these records. 
+Now, we would like to know, between 2014 and 2018, are there any crimes reported later than a year, a month,or a week.
+
+
+We can also check if the reportedyear and the occurenceyear is difference.
+Using data4 (contain only crimes from 2014)
+YEAR
+```{r}
+later_year <- data4 %>% 
+  filter(occurrenceyear < reportedyear) %>% 
+  count()
+
+later_year
+```
+There are 2141 cases reported in the next year after the crime happened.It should be noted that these cases could happen in December in 2014 but reported in January in 2015.
+```{r}
+class(data4$occurrenceyear)
+class(data4$reportedyear)
+```
+
+
+We can also detect if there are any mistake on year, such as reportedyear is earlier than occurrenceyear
+```{r}
+later_year2 <- data4 %>% 
+  filter(reportedyear < occurrenceyear) %>% 
+  count()
+
+later_year2
+```
+There is no mistake about the year.
+
+MONTH
+We want to know if there cases reported at least a month later. 
+In this case, we should fix the year the same
+
+```{r}
+month_later <- data4 %>% 
+  filter(occurrencemonth != reportedmonth,occurrenceyear == reportedyear) %>%
+  group_by(occurrenceyear) %>% 
+  count()
+
+month_later
+```
+The table shows the number of cases that was not reported within a month, for each year from 2014 to 2018. In 2008, the number of crimes reported at least one month later reached 2067.
+
+
+
+```{r}
+later_date <- data4 %>% 
+  filter(occurrenceday < reportedday,
+         occurrenceyear == reportedyear, 
+         occurrencemonth == reportedmonth) %>%
+  group_by(occurrenceyear,occurrencemonth) %>% 
+  count()
+
+later_date
+```
+
+Each month, at least 500 cases were reported later than 1 day.
+
+```{r}
+dayofyear <- data4 %>% 
+  group_by(occurrencedayofyear) %>% 
+  summarise(counts = n())
+
+head(dayofyear)
+```
+
+```{r, fig.width = 15, fig.height = 5}
+g_occurrencedayofyear <- ggplot(dayofyear, 
+            aes(x = occurrencedayofyear, y = counts))
+g_occurrencedayofyear + geom_line(color = "purple") + geom_point (color = "blue", size = 2) +
+      labs(title = "Number of crimes though a year", 
+           caption = "Source: CMI dataset",
+           x = "Day of year",
+           y = "Counts") + theme_set(theme_classic())
+```
+
+
+```{r, fig.width = 15, fig.height = 5}
+dayofyear_2014 <- data4 %>% 
+  filter(occurrenceyear == 2014) %>% 
+  group_by(occurrencedayofyear) %>% 
+  summarise(counts = n())
+
+g_occurrencedayofyear <- ggplot(dayofyear_2014, 
+            aes(x = occurrencedayofyear, y = counts))
+g_occurrencedayofyear + geom_line(color = "purple") + geom_point (color = "black", size = 2) +
+  ylim(40,200)+
+      labs(title = "Number of crimes during 2014", 
+           caption = "Source: CMI dataset",
+           x = "Day of year",
+           y = "Counts") + theme_set(theme_classic())
+```
+
+
+```{r, fig.width = 15, fig.height = 5}
+dayofyear_2015 <- data4 %>% 
+  filter(occurrenceyear == 2015) %>% 
+  group_by(occurrencedayofyear) %>% 
+  summarise(counts = n())
+
+g_occurrencedayofyear <- ggplot(dayofyear_2015, 
+            aes(x = occurrencedayofyear, y = counts))
+g_occurrencedayofyear + geom_line(color = "grey") + geom_point (color = "blue", size = 2) + ylim(40, 200) +
+      labs(title = "Number of crimes during 2015", 
+           caption = "Source: CMI dataset",
+           x = "Day of year",
+           y = "Counts") + theme_set(theme_classic())
+```
+
+
+```{r, fig.width = 15, fig.height = 5}
+dayofyear_2016 <- data4 %>% 
+  filter(occurrenceyear == 2016) %>% 
+  group_by(occurrencedayofyear) %>% 
+  summarise(counts = n())
+
+g_occurrencedayofyear <- ggplot(dayofyear_2016, 
+            aes(x = occurrencedayofyear, y = counts))
+g_occurrencedayofyear + geom_line(color = "grey") + geom_point (color = "red", size = 2) + 
+  ylim(40, 200) +
+      labs(title = "Number of crimes during 2016", 
+           caption = "Source: CMI dataset",
+           x = "Day of year",
+           y = "Counts") + theme_set(theme_classic())
+```
+
+
+```{r, fig.width = 15, fig.height = 5}
+dayofyear_2017 <- data4 %>% 
+  filter(occurrenceyear == 2017) %>% 
+  group_by(occurrencedayofyear) %>% 
+  summarise(counts = n())
+
+g_occurrencedayofyear <- ggplot(dayofyear_2017, 
+            aes(x = occurrencedayofyear, y = counts))
+g_occurrencedayofyear + geom_line(color = "grey") + geom_point (color = "black", size = 2) +
+  ylim(40, 200) +
+      labs(title = "Number of crimes during 2017", 
+           caption = "Source: CMI dataset",
+           x = "Day of year",
+           y = "Counts") + theme_set(theme_classic())
+```
+
+
+```{r, fig.width = 15, fig.height = 5}
+dayofyear_2018 <- data4 %>% 
+  filter(occurrenceyear == 2018) %>% 
+  group_by(occurrencedayofyear) %>% 
+  summarise(counts = n())
+
+g_occurrencedayofyear <- ggplot(dayofyear_2018, 
+            aes(x = occurrencedayofyear, y = counts))
+g_occurrencedayofyear + geom_line(color = "grey") + 
+  geom_point (color = "purple", size = 2) +  
+  ylim(40, 200) +
+      labs(title = "Number of crimes during 2018", 
+           caption = "Source: CMI dataset",
+           x = "Day of year",
+           y = "Counts") + theme_set(theme_classic())
+```
+
+
+(To be continued)
+
+```{r}
+
+data_profile <- read_csv("C:/Users/TrungDang/Documents/neighbourhood-profiles-2016.csv")
+str(data_profile)
+```
+
+
+```{r}
+colnames(data_profile)
+```
+
+
+
+```{r}
+head(data_profile[2:10,4:10],20)
+```
+
+```{r}
+data_profile2 <- as.matrix(data_profile)
+
+data3 <- as.data.frame(t(data_profile2))
+
+head(data3)
+
+```
+
